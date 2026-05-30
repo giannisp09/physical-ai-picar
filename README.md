@@ -1,9 +1,12 @@
 # Physical AI · PiCar
 
-**Giving an off-the-shelf robot car an LLM brain.** You hand it a goal in plain
-English — *"find the red ball"*, *"drive forward until you see a doorway, then
-stop"* — and a Claude vision-and-tool-use loop perceives, reasons, and drives
-the real hardware one step at a time.
+**One robot, many AI brains.** A platform for controlling a physical robot
+through different AI control interfaces that all plug into the same hardware
+abstraction. The interface built today — and the focus of this repo — is an
+**LLM agent**: you hand the robot a goal in plain English (*"find the red
+ball"*, *"drive forward until you see a doorway, then stop"*) and a Claude
+vision-and-tool-use loop perceives, reasons, and drives the real hardware one
+step at a time.
 
 <p align="left">
   <img alt="Python" src="https://img.shields.io/badge/python-3.11%2B-blue">
@@ -12,9 +15,11 @@ the real hardware one step at a time.
   <img alt="License" src="https://img.shields.io/badge/license-MIT-green">
 </p>
 
-> This is an ongoing **Physical AI** project. The current control method is an
-> LLM agent (below). The architecture is built to host *other* control methods
-> over time — see the [Roadmap](#roadmap).
+> **Physical AI platform.** The robot exposes a single hardware abstraction
+> (`RobotBackend`); different AI control interfaces plug into it interchangeably.
+> The interface implemented today is an **LLM agent** (described below). Planned
+> next: **Vision-Language-Action (VLA)** policies and **world-model /
+> action-conditioned prediction** (V-JEPA-style) — see the [Roadmap](#roadmap).
 
 ---
 
@@ -38,19 +43,21 @@ defining shape of a Physical AI system.
 
 ## Architecture
 
+The design principle: **one hardware abstraction, many interchangeable AI
+control interfaces.** Each "brain" perceives and acts in its own paradigm, but
+they all drive the robot through the same `RobotBackend` surface — so adding a
+new interface never touches hardware code.
+
 ```
-                 natural-language goal
-                          │
-                          ▼
+   AI CONTROL INTERFACES (the "brain" — swappable)
+   ┌──────────────┐  ┌──────────────┐  ┌────────────────────┐
+   │ LLM agent  ✅ │  │ VLA policy ⬜ │  │ World model ⬜      │
+   │ Claude vision│  │ pixels+text  │  │ action-conditioned │
+   │ + tool use   │  │ → actions    │  │ prediction (VJEPA) │
+   └──────┬───────┘  └──────┬───────┘  └─────────┬──────────┘
+          └─────────────────┼────────────────────┘
+                            ▼
             ┌───────────────────────────┐
-            │   Agent loop (agent.py)    │
-            │  • sends frame + distance  │
-            │  • Claude picks ONE tool   │◀─────────────┐
-            │  • executes, re-observes   │              │
-            └───────────────────────────┘              │
-                          │ tool call                  │ new frame
-                          ▼                            │ + distance
-            ┌───────────────────────────┐              │
             │  RobotBackend (backend.py) │  abstract control surface
             │  drive / turn / look /     │
             │  stop / distance / frame   │
@@ -63,6 +70,20 @@ defining shape of a Physical AI system.
         │ synthetic cam  │  │ servos, camera,  │
         │ (for testing)  │  │ ultrasonic (Pi)  │
         └────────────────┘  └──────────────────┘
+```
+
+### The LLM agent interface (built today)
+
+```
+   goal ──▶ ┌───────────────────────────┐
+            │   Agent loop (agent.py)    │
+            │  • sends frame + distance  │
+            │  • Claude picks ONE tool   │◀─────── new frame + distance ──┐
+            │  • executes, re-observes   │                               │
+            └─────────────┬─────────────┘                               │
+                          │ tool call (drive/turn/look/stop) ───────────┘
+                          ▼
+                    RobotBackend  (mock on laptop · picar on the Pi)
 ```
 
 The **same agent** runs against either backend — so the entire control loop is
@@ -114,16 +135,22 @@ watchdog is enabled automatically on this backend.
 
 ### Deploying code to the Pi
 
-[`deploy.sh`](deploy.sh) syncs this folder between a Mac and the Pi over SSH
-(rsync, preview-then-confirm, **never deletes**):
+Git is the source of truth for this project. [`deploy.sh`](deploy.sh) is a
+complement to it, not a replacement — it solves the *inner-loop* problem of
+debugging against real hardware: pushing **uncommitted, work-in-progress**
+changes to the robot instantly and pulling **robot-side calibration tweaks**
+(servo offsets, motor trims edited live on the Pi) back to the Mac — without a
+commit for every one-line experiment. It syncs the working tree over SSH with
+rsync, previews every change, asks before applying, and **never deletes**:
 
 ```bash
-./deploy.sh diff            # show what differs
-./deploy.sh push ai_control # send the agent to the robot
+./deploy.sh diff            # show what differs (read-only)
+./deploy.sh push ai_control # send WIP agent changes to the robot
 ./deploy.sh pull web        # grab robot-side driver tweaks back
 ```
 
-Configure the target with `PICAR_SSH` / `PICAR_KEY` env vars.
+Configure the target with `PICAR_SSH` / `PICAR_KEY` env vars. Once an
+experiment works, it gets committed to git as usual.
 
 ## Repository layout
 
@@ -144,13 +171,19 @@ breakdown of what's mine vs. the manufacturer's.
 
 ## Roadmap
 
-This repo is the LLM-agent chapter of a broader Physical AI exploration. Planned
-additions, each as a sibling control method behind the same `RobotBackend`:
+The goal is to run **the same robot under different AI control paradigms** and
+compare them, each implemented as a sibling interface behind the same
+`RobotBackend`:
 
-- [ ] Classical autonomy baselines (PID line/wall following) for comparison
-- [ ] Local vision (on-device object detection) feeding the agent
-- [ ] Imitation / reinforcement learning policies
-- [ ] Evaluation harness: success rate per goal across methods
+- [x] **LLM agent** — Claude vision + tool use, discrete actions *(this repo)*
+- [ ] **Vision-Language-Action (VLA)** — an end-to-end policy mapping camera
+  pixels + instruction directly to continuous actions, instead of an LLM
+  emitting discrete tool calls
+- [ ] **World model + action-conditioned prediction** — learn a predictive model
+  of the robot's world (V-JEPA-style) and plan by *imagining* the outcomes of
+  candidate actions before committing to one
+- [ ] **Evaluation harness** — success rate / steps-to-goal per interface, so the
+  paradigms can be benchmarked head-to-head on identical tasks
 
 ## Tech
 
