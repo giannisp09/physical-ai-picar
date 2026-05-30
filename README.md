@@ -72,21 +72,30 @@ new interface never touches hardware code.
         └────────────────┘  └──────────────────┘
 ```
 
-### The LLM agent interface (built today)
+### How the seam works
+
+A shared **runner** owns the episode loop; a **controller** is the only swappable
+part. The runner never knows which brain it's driving:
 
 ```
-   goal ──▶ ┌───────────────────────────┐
-            │   Agent loop (agent.py)    │
-            │  • sends frame + distance  │
-            │  • Claude picks ONE tool   │◀─────── new frame + distance ──┐
-            │  • executes, re-observes   │                               │
-            └─────────────┬─────────────┘                               │
-                          │ tool call (drive/turn/look/stop) ───────────┘
+   runner.py            controller (the swappable brain)        backend
+   ─────────            ────────────────────────────────        ───────
+   observe   ──▶  Observation ──▶  Controller.act(obs)
+   (frame +                         • LLMController  → Claude tool call
+    distance)                       • VLAController  → policy forward pass
+                                     • WorldModel…   → planned rollout
+                          ┌───────────────┘
                           ▼
-                    RobotBackend  (mock on laptop · picar on the Pi)
+                   neutral Action  ──▶  execute()  ──▶  RobotBackend
+                  (Drive/Turn/Look/Stop/Done)          (mock · picar)
+                          │
+                          └──▶  re-observe, repeat until Done / max steps
 ```
 
-The **same agent** runs against either backend — so the entire control loop is
+Adding a control method = one new `Controller` subclass. It never touches the
+loop (`runner.py`), the hardware (`backend.py`), or the action translation
+(`action.execute`). The **same controller + same loop** runs against either
+backend — so the entire control loop is
 developed and tested on a laptop with **zero hardware**, then deployed unchanged
 to the Pi. Key design choices:
 
@@ -156,12 +165,16 @@ experiment works, it gets committed to git as usual.
 
 | Path                                | Author | Description                                  |
 | ----------------------------------- | :----: | -------------------------------------------- |
-| **`ai_control/`**                   |  Me    | **The LLM agent — the heart of this repo**   |
-| &nbsp;&nbsp;`agent.py`              |  Me    | Claude loop: prompt, tools, observe/act      |
-| &nbsp;&nbsp;`backend.py`           |  Me    | `RobotBackend` abstract interface            |
-| &nbsp;&nbsp;`mock_backend.py`      |  Me    | Laptop simulator + synthetic camera          |
-| &nbsp;&nbsp;`picar_backend.py`     |  Me    | Real Raspberry Pi hardware control           |
-| &nbsp;&nbsp;`main.py`              |  Me    | CLI entry point + safety watchdog            |
+| **`ai_control/`**                   |  Me    | **The control platform — the heart of this repo** |
+| &nbsp;&nbsp;`controller.py`         |  Me    | `Controller` seam + `make_controller` factory |
+| &nbsp;&nbsp;`llm_controller.py`     |  Me    | LLM brain: Claude prompt, tools, tool→action |
+| &nbsp;&nbsp;`vla_controller.py`     |  Me    | VLA brain — planned stub, proves the seam    |
+| &nbsp;&nbsp;`runner.py`             |  Me    | Shared episode loop + safety watchdog        |
+| &nbsp;&nbsp;`observation.py`, `action.py` | Me | Paradigm-neutral perception + action types |
+| &nbsp;&nbsp;`backend.py`            |  Me    | `RobotBackend` hardware abstraction          |
+| &nbsp;&nbsp;`mock_backend.py`       |  Me    | Laptop simulator + synthetic camera          |
+| &nbsp;&nbsp;`picar_backend.py`      |  Me    | Real Raspberry Pi hardware control           |
+| &nbsp;&nbsp;`main.py`               |  Me    | CLI: pick `--controller` and `--backend`     |
 | **`deploy.sh`**                     |  Me    | Mac ↔ Pi sync helper                         |
 | `web/`, `examples/`, `setup*.py`    | Adeept | Stock kit software (drivers, demos, install) |
 

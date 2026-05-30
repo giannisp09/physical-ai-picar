@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Any, Optional
 
 
 @dataclass
@@ -7,6 +8,9 @@ class FrameResult:
     jpeg_bytes: bytes
     width: int
     height: int
+    # Raw HxWx3 RGB array when the backend can provide one (for VLAs / world
+    # models). Optional so the LLM/JPEG path needs no numpy dependency.
+    rgb: Optional[Any] = None
 
 
 class RobotBackend(ABC):

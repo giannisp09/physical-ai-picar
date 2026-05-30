@@ -101,7 +101,7 @@ class PicarBackend(RobotBackend):
         if not ok:
             raise RuntimeError("failed to encode camera frame")
         h, w = img.shape[:2]
-        return FrameResult(jpeg_bytes=buf.tobytes(), width=w, height=h)
+        return FrameResult(jpeg_bytes=buf.tobytes(), width=w, height=h, rgb=img)
 
     def shutdown(self) -> None:
         if self._stopped:
