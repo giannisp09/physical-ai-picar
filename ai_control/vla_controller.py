@@ -10,8 +10,9 @@ Implementation sketch:
     1. Load a VLA checkpoint (e.g. an OpenVLA / pi0-style policy) in __init__.
     2. In act(): feed obs.frame_rgb (raw HxWx3) + self.goal to the model.
     3. Map the model's output to a neutral Action (Drive/Turn/Look/Stop/Done).
-       obs.frame_rgb is provided by PicarBackend; the mock backend leaves it
-       None, so test against real frames or extend MockBackend to render RGB.
+       obs.frame_rgb (raw HxWx3 uint8) is provided by both PicarBackend and the
+       MockBackend (when numpy is installed), so the VLA can be developed
+       hardware-free against the simulator, exactly like the LLM controller.
 """
 from action import Action
 from controller import Controller

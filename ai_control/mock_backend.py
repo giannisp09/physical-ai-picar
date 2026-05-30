@@ -50,24 +50,35 @@ class MockBackend(RobotBackend):
         # Visible target if our pan angle is near the target's world angle
         offset = self._target_world_angle - self._pan
         target_visible = abs(offset) < 30
-        jpeg = _render_synthetic_frame(
+        img = _render_synthetic_frame(
             step=self._step,
             target_visible=target_visible,
             target_offset_x=offset,
             pan=self._pan,
             tilt=self._tilt,
         )
-        return FrameResult(jpeg_bytes=jpeg, width=320, height=240)
+        if img is None:  # PIL missing — fall back to a tiny valid JPEG, no rgb
+            return FrameResult(jpeg_bytes=_solid_jpeg(), width=1, height=1)
+
+        buf = io.BytesIO()
+        img.save(buf, format="JPEG", quality=80)
+        return FrameResult(
+            jpeg_bytes=buf.getvalue(),
+            width=img.width,
+            height=img.height,
+            rgb=_to_rgb_array(img),  # HxWx3 uint8 for VLAs/world models, or None
+        )
 
     def shutdown(self) -> None:
         print("[mock] shutdown")
 
 
-def _render_synthetic_frame(*, step, target_visible, target_offset_x, pan, tilt) -> bytes:
+def _render_synthetic_frame(*, step, target_visible, target_offset_x, pan, tilt):
+    """Render the simulated camera view as a PIL Image (or None if PIL is absent)."""
     try:
         from PIL import Image, ImageDraw
     except ImportError:
-        return _solid_jpeg()
+        return None
 
     W, H = 320, 240
     img = Image.new("RGB", (W, H), (40, 60, 90))
@@ -85,9 +96,20 @@ def _render_synthetic_frame(*, step, target_visible, target_offset_x, pan, tilt)
     draw.text((6, 6), f"step={step} pan={pan:+d} tilt={tilt:+d}", fill=(220, 220, 220))
     if not target_visible:
         draw.text((6, H - 20), "(target not in view)", fill=(180, 180, 180))
-    buf = io.BytesIO()
-    img.save(buf, format="JPEG", quality=80)
-    return buf.getvalue()
+    return img
+
+
+def _to_rgb_array(img):
+    """PIL Image -> HxWx3 uint8 RGB array, or None if numpy isn't installed.
+
+    Kept optional so the LLM path (which only needs the JPEG) has no hard numpy
+    dependency; the VLA / world-model path uses this for raw pixels.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        return None
+    return np.asarray(img.convert("RGB"), dtype="uint8")
 
 
 def _solid_jpeg() -> bytes:
